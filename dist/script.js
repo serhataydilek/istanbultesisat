@@ -1,3 +1,6 @@
+// Replace this public Formspree endpoint before enabling real review submissions.
+const REVIEW_FORM_ENDPOINT = 'FORM_ENDPOINT_HERE';
+
 const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const menuButton = document.querySelector('.menu-toggle');
 const mobileNav = document.querySelector('#mobile-nav');
@@ -170,6 +173,8 @@ const ratingField = document.querySelector('.star-field');
 const previewName = document.querySelector('#preview-name');
 const previewRating = document.querySelector('#preview-rating');
 const previewText = document.querySelector('#preview-text');
+const reviewSubmit = document.querySelector('#review-submit');
+const submitStatus = document.querySelector('#review-submit-status');
 const fieldErrors = {
   name: document.querySelector('#review-name-error'),
   rating: document.querySelector('#rating-error'),
@@ -183,6 +188,7 @@ const ratingLabels = {
   5: 'Çok iyi'
 };
 let selectedRating = 0;
+let isSubmitting = false;
 
 function setError(field, text) {
   const error = fieldErrors[field];
@@ -191,6 +197,23 @@ function setError(field, text) {
   if (field === 'name') reviewName.setAttribute('aria-invalid', String(Boolean(text)));
   if (field === 'review') reviewText.setAttribute('aria-invalid', String(Boolean(text)));
   if (field === 'rating') ratingField.classList.toggle('is-invalid', Boolean(text));
+}
+
+function setSubmissionStatus(message, type = '') {
+  submitStatus.textContent = message;
+  submitStatus.hidden = !message;
+  submitStatus.classList.toggle('is-notice', type === 'notice');
+}
+
+function endpointIsConfigured() {
+  return REVIEW_FORM_ENDPOINT !== 'FORM_ENDPOINT_HERE' && /^https:\/\//.test(REVIEW_FORM_ENDPOINT);
+}
+
+function setSubmitting(submitting) {
+  isSubmitting = submitting;
+  reviewSubmit.disabled = submitting;
+  reviewSubmit.textContent = submitting ? 'Gönderiliyor...' : 'Değerlendirmeyi Gönder';
+  form.setAttribute('aria-busy', String(submitting));
 }
 
 function paintStars(previewRating = 0) {
@@ -215,6 +238,8 @@ function resetReviewForm() {
   paintStars();
   ratingLabel.textContent = 'Puanınızı seçin';
   Object.keys(fieldErrors).forEach(field => setError(field, ''));
+  setSubmissionStatus('');
+  setSubmitting(false);
   reviewSuccess.hidden = true;
   form.hidden = false;
 }
@@ -252,8 +277,9 @@ starButtons.forEach((button, index) => {
 
 reviewName.addEventListener('input', () => setError('name', ''));
 reviewText.addEventListener('input', () => setError('review', ''));
-form.addEventListener('submit', event => {
+form.addEventListener('submit', async event => {
   event.preventDefault();
+  if (isSubmitting) return;
   const name = reviewName.value.trim();
   const review = reviewText.value.trim();
   const errors = {
@@ -267,11 +293,41 @@ form.addEventListener('submit', event => {
     firstInvalid.focus();
     return;
   }
+  if (!endpointIsConfigured()) {
+    setSubmissionStatus('Değerlendirme sistemi henüz aktif değil.', 'notice');
+    return;
+  }
+  setSubmissionStatus('Gönderiliyor...');
+  setSubmitting(true);
+  const payload = {
+    name,
+    rating: selectedRating,
+    review,
+    page_url: window.location.href,
+    submitted_at: new Date().toISOString()
+  };
+  try {
+    const response = await fetch(REVIEW_FORM_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) throw new Error(`Review submission failed with ${response.status}`);
+  } catch {
+    setSubmissionStatus('Değerlendirmeniz gönderilemedi. Lütfen tekrar deneyin.');
+    setSubmitting(false);
+    return;
+  }
   previewName.textContent = name;
   previewRating.textContent = `${selectedRating}/5 — ${ratingLabels[selectedRating]}`;
   previewText.textContent = review;
   form.hidden = true;
   reviewSuccess.hidden = false;
+  setSubmissionStatus('');
+  setSubmitting(false);
   reviewSuccess.querySelector('h3').focus();
 });
 newReview.addEventListener('click', () => {
